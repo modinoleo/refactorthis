@@ -1,3 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Moq;
 using RefactorThis.Domain1.Models.Entities;
 using RefactorThis.Domain1.Repositories.Contracts;
 using RefactorThis.Domain1.Services.Contracts;
@@ -11,13 +14,16 @@ namespace RefactorThis.Domain.Tests1
     {
         protected IInvoiceRepository? _invoiceRepository;
         protected IInvoiceService? _invoiceService;
-
+        protected ILoggerFactory? _loggerFactory;
         [TestInitialize]
         public void Initialize()
         {
-            _invoiceRepository = new InvoiceRepository();
-            _invoiceService = new InvoiceService(_invoiceRepository);
-        
+            var invoiceServiceLoggerMock = new Mock<ILogger<InvoiceService>>();
+            var invoiceRepositoryLoggerMock = new Mock<ILogger<InvoiceRepository>>();
+            var mockInvoiceRepository = new Mock<IInvoiceRepository>();
+            _invoiceRepository = new InvoiceRepository(invoiceRepositoryLoggerMock.Object);
+            _invoiceService = new InvoiceService(_invoiceRepository, invoiceServiceLoggerMock.Object);
+
         }
 
         [TestMethod]
@@ -74,7 +80,7 @@ namespace RefactorThis.Domain.Tests1
                 {
                     new Payment
                     {
-                        Amount = 10
+                        Amount = 10,
                     }
                 }
             };
@@ -136,6 +142,112 @@ namespace RefactorThis.Domain.Tests1
             var result = await _invoiceService.ProcessPaymentAsync(payment);
 
             Assert.AreEqual("the payment is greater than the invoice amount", result);
+        }
+
+        [TestMethod]
+        public async Task ProcessPayment_Should_ReturnFullyPaidMessage_When_PartialPaymentExistsAndAmountPaidEqualsAmountDue()
+        {
+            if (_invoiceRepository == null) throw new NullReferenceException();
+            if (_invoiceService == null) throw new NullReferenceException();
+            var invoice = new Invoice(_invoiceRepository)
+            {
+                Amount = 10,
+                AmountPaid = 5,
+                Payments = new List<Payment>
+                {
+                    new Payment
+                    {
+                        Amount = 5
+                    }
+                }
+            };
+            await _invoiceRepository.AddAsync(invoice);
+
+
+            var payment = new Payment()
+            {
+                Amount = 5
+            };
+
+            var result = await _invoiceService.ProcessPaymentAsync(payment);
+
+            Assert.AreEqual("final partial payment received, invoice is now fully paid", result);
+        }
+
+        [TestMethod]
+        public async Task ProcessPayment_Should_ReturnFullyPaidMessage_When_NoPartialPaymentExistsAndAmountPaidEqualsInvoiceAmount()
+        {
+            if (_invoiceRepository == null) throw new NullReferenceException();
+            if (_invoiceService == null) throw new NullReferenceException();
+
+            var invoice = new Invoice(_invoiceRepository)
+            {
+                Amount = 10,
+                AmountPaid = 0,
+                Payments = new List<Payment>() { new Payment() { Amount = 10 } }
+            };
+            await _invoiceRepository.AddAsync(invoice);
+
+            var payment = new Payment()
+            {
+                Amount = 10
+            };
+
+            var result = await _invoiceService.ProcessPaymentAsync(payment);
+
+            Assert.AreEqual("invoice was already fully paid", result);
+        }
+
+        [TestMethod]
+        public async Task ProcessPayment_Should_ReturnPartiallyPaidMessage_When_PartialPaymentExistsAndAmountPaidIsLessThanAmountDue()
+        {
+            if (_invoiceRepository == null) throw new NullReferenceException();
+            if (_invoiceService == null) throw new NullReferenceException();
+
+            var invoice = new Invoice(_invoiceRepository)
+            {
+                Amount = 10,
+                AmountPaid = 5,
+                Payments = new List<Payment>
+                {
+                    new Payment
+                    {
+                        Amount = 5
+                    }
+                }
+            };
+            await _invoiceRepository.AddAsync(invoice);
+
+            var payment = new Payment()
+            {
+                Amount = 1
+            };
+
+            var result = await _invoiceService.ProcessPaymentAsync(payment);
+
+            Assert.AreEqual("another partial payment received, still not fully paid", result);
+        }
+        [TestMethod]
+        public async Task ProcessPayment_Should_ReturnPartiallyPaidMessage_When_NoPartialPaymentExistsAndAmountPaidIsLessThanInvoiceAmount()
+        {
+            if (_invoiceRepository == null) throw new NullReferenceException();
+            if (_invoiceService == null) throw new NullReferenceException();
+            var invoice = new Invoice(_invoiceRepository)
+            {
+                Amount = 10,
+                AmountPaid = 0,
+                Payments = new List<Payment>()
+            };
+            await _invoiceRepository.AddAsync(invoice);
+
+            var payment = new Payment()
+            {
+                Amount = 1
+            };
+
+            var result = await _invoiceService.ProcessPaymentAsync(payment);
+
+            Assert.AreEqual("invoice is now partially paid", result);
         }
     }
 }
